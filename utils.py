@@ -83,19 +83,9 @@ def read_clip_and_label(filename, batch_size, start_pos=-1, num_frames_per_clip=
 
   return np_arr_data, np_arr_label, next_batch_start, read_dirnames, valid_len
 
-def get_multi_gpu_models(args, model):
-  models = []
-  for gpu_idx in range(args.num_gpus):
-    with tf.name_scope("model_%d"%gpu_idx), tf.device("/gpu:%d"gpu_idx):
-      c3d = model(args)
-      tf.get_variable_scope().reuse_variables()
-      models.append(model)
-  return models
-
 def get_config_proto(log_device_placement=False, allow_soft_placement=True):
   config_proto = tf.ConfigProto(
       log_device_placement=log_device_placement,
       allow_soft_placement=allow_soft_placement)
   config_proto.gpu_options.allow_growth = True
   return config_proto
-
