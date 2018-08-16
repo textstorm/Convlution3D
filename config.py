@@ -16,7 +16,6 @@ def get_args():
   parser.add_argument('--img_w', type=int, default=112, help="image weight")
   parser.add_argument('--frame_size', type=int, default=16, help="frames a clip")
   parser.add_argument('--channels', type=int, default=3, help="num of channels")
-  parser.add_argument('--nb_classes', type=int, default=101, help="classes num")
 
   #optim
   parser.add_argument('--num_gpu', type=int, default=2, help='gpu num')
