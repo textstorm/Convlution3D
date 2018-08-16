@@ -3,23 +3,25 @@ import tensorflow as tf
 import numpy as np
 
 class C3D(object):
-  def __init__(self, args, name=None):
+  def __init__(self, args, sess, idx=0, name=None):
     self.img_h = args.img_h
     self.img_w = args.img_w
     self.frame_size = args.frame_size
     self.channels = args.channels
     self.nb_classes = args.nb_classes
     self.num_gpu = args.num_gpu
-
-    self.batch_size = args.batch_size * self.num_gpu
+    self.sess = sess
+    self.batch_size = args.batch_size
 
     self.images = tf.placeholder(tf.float32, [self.batch_size, self.frame_size, self.img_h, self.img_w, self.channels],
                                 name="input_videos")
     self.labels = tf.placeholder(tf.int64, [self.batch_size], name='labels')
     self.is_train = tf.placeholder(tf.bool, name="is_train")
-
+    self.dropout = tf.cond(self.is_train, lambda: args.dropout, lambda: 0.0)
     self.global_step = tf.get_variable(shape=[], initializer=tf.constant_initializer(0), 
                                        trainable=False, name='global_step')
+
+    self.tvars = tf.trainable_variables()
 
     with tf.variable_scope(name):
       x = tf.nn.relu(self.conv3d(self.images, 3, 3, 3, 3, 64, "conv1"))
@@ -47,7 +49,7 @@ class C3D(object):
       cross_entropy = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
                                     labels=self.labels, logits=logits))
       tf.summary.scalar("loss" + '_cross_entropy', cross_entropy)
-      weight_decay_loss = tf.get_collection('weightdecay_losses')
+      weight_decay_loss = tf.get_collection('weightdecay_losses', scope="model_%d"%idx)
       tf.summary.scalar("loss" + '_weight_decay_loss', tf.reduce_mean(weight_decay_loss))
       self.total_loss = cross_entropy + weight_decay_loss
       tf.summary.scalar("loss" + '_total_loss', tf.reduce_mean(self.total_loss))
@@ -56,18 +58,23 @@ class C3D(object):
       self.infer_op = tf.argmax(logits, 1)
 
     with tf.name_scope("accuracy"):
-      correct_pred = tf.equal(tf.argmax(logit, 1), labels)
+      correct_pred = tf.equal(tf.argmax(logits, 1), self.labels)
       accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
-      return accuracy
 
-  def conv3d(self, x, fs, hs, ws, n_in, n_out, stds, name=None):
-    w = self.variable_with_weight_decay(shape=[fs, hs, ws, n_in, n_out], name=name+"_w", wd=0.0005)
+    init_op = tf.global_variables_initializer()
+    self.sess.run(init_op)
+    self.summary = tf.summary.merge_all()
+    self.saver = tf.train.Saver(tf.global_variables())
+
+  def conv3d(self, x, fs, hs, ws, n_in, n_out, name=None):
+    # w = self.variable_with_weight_decay(shape=[fs, hs, ws, n_in, n_out], name=name+"_w", wd=0.0005)
+    w = self.variable_with_weight_decay(shape=[fs, hs, ws, n_in, n_out], name=name+"_w")
     b = self.variable_with_weight_decay(shape=[n_out], name=name+"_bias")
-    x = tf.nn.conv3d(x, x, w, strides=[1, 1, 1, 1, 1], padding='SAME', name=name)
+    x = tf.nn.conv3d(x, w, strides=[1, 1, 1, 1, 1], padding='SAME', name=name)
     return tf.nn.bias_add(x, b)
 
   def max_pool3d(self, x, k, name):
-    return tf.nn.max_pool3d(x, [1, k, 2, 2, 1], [1, k, 2, 2, 2], padding="SAME", name=name)
+    return tf.nn.max_pool3d(x, [1, k, 2, 2, 1], [1, k, 2, 2, 1], padding="SAME", name=name)
 
   def build_feed_dict(self, images, labels, is_train):
     return {self.images: images, self.labels: labels, self.is_train: is_train}
@@ -84,28 +91,40 @@ class C3D(object):
       tf.add_to_collection('weightdecay_losses', weight_decay)
     return var
 
+def get_multi_gpu_models(args, sess):
+  models = []
+  with tf.variable_scope(tf.get_variable_scope()):
+    for gpu_idx in range(args.num_gpu):
+      with tf.name_scope("model_%d"%gpu_idx), tf.device("/gpu:%d"%gpu_idx):
+        c3d = C3D(args, sess, gpu_idx, name="C3D")
+        tf.get_variable_scope().reuse_variables()
+        models.append(c3d)
+  return models
 
-class MutiGPU(object):
-  def __init__(self, args, sess, models):
-    self.model = model
+class MultiGPU(object):
+  def __init__(self, args, models):
+    self.model = models[0]
     self.max_grad_norm = args.max_grad_norm
     self.learning_rate = args.learning_rate
     self.optimizer = tf.train.AdamOptimizer(self.learning_rate)
     self.global_step = self.model.global_step
-    self.summary = model.summary
+    self.summary = self.model.summary
     self.models = models
 
     loss_list = []
     grads_list = []
-    for gpu_idx model in range(self.model.num_gpu):
-      with tf.name_scope("grads_%d"%gpu_idx), tf.device("/gpu:%d"%gpu_idx):
-        loss = self.model.total_loss
-        grads_and_vars = self.optimizer.compute_gradients(loss)
-        grads_and_vars = [(tf.clip_by_norm(g, self.max_grad_norm), v) for g, v in grads_and_vars]
-        loss_list.append(loss)
-        grads_list.append(grads_and_vars)
 
-    self.loss = tf.add_n(loss_list) / len(losses)
+    with tf.variable_scope(tf.get_variable_scope()):
+      for gpu_idx, model in enumerate(self.models):
+        with tf.name_scope("grads_%d"%gpu_idx), tf.device("/gpu:%d"%gpu_idx):
+          loss = model.total_loss
+          grads_and_vars = self.optimizer.compute_gradients(loss)
+          grads_and_vars = [(tf.clip_by_norm(g, self.max_grad_norm), v) for g, v in grads_and_vars]
+          loss_list.append(loss)
+          grads_list.append(grads_and_vars)
+          tf.get_variable_scope().reuse_variables()
+
+    self.loss = tf.add_n(loss_list) / len(loss_list)
     self.grads_and_vars = self.average_gradients(grads_list)
     self.train_op = self.optimizer.apply_gradients(self.grads_and_vars, global_step=self.global_step)
 
