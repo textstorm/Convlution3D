@@ -9,6 +9,8 @@ def get_args():
   #data
   parser.add_argument('--save_dir', type=str, default='save/saves', help="save path")
   parser.add_argument('--log_dir', type=str, default='save/logs', help='log path')
+  parser.add_argument('--load_path', type=str, default='preprocess/conv3d_deepnetA_sport1m_iter_1900000_TF.model',\
+                     help="load path")
 
   # model
   parser.add_argument('--nb_classes', type=int, default=101, help="classes num")
@@ -19,12 +21,12 @@ def get_args():
 
   #optim
   parser.add_argument('--num_gpu', type=int, default=2, help='gpu num')
-  parser.add_argument('--batch_size', type=int, default=32, help='example numbers every batch')
+  parser.add_argument('--batch_size', type=int, default=16, help='example numbers every batch')
   parser.add_argument('--dropout', type=float, default=0.5, help='dropout rate')
   parser.add_argument('--nb_epochs', type=int, default=10, help='number of epoch')
   parser.add_argument('--nb_steps', type=int, default=1000, help='number of steps')
   parser.add_argument('--learning_rate', type=float, default=0.0001, help='Initial learning rate')
   parser.add_argument('--max_grad_norm', type=float, default=10.0, help='Max norm of gradient')
-  parser.add_argument('--log_step', type=int, default=10, help='log steps')
+  parser.add_argument('--log_step', type=int, default=1, help='log steps')
 
   return parser.parse_args()
