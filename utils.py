@@ -35,7 +35,7 @@ def read_clip_and_label(filename, batch_size, start_pos=-1, num_frames_per_clip=
   if start_pos < 0:
     shuffle = True
   if shuffle:
-    video_indices = range(len(lines))
+    video_indices = list(range(len(lines)))
     random.seed(time.time())
     random.shuffle(video_indices)
   else:
