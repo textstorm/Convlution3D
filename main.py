@@ -17,7 +17,7 @@ def valid(valid_data, model, sess):
     total_logits += logits_t.tolist()
     total_labels += labels
   auc = metrics.roc_auc_score(np.array(total_labels), np.array(total_logits))
-  print "auc %f in valid comments" % auc
+  print ("auc %f in valid comments" % auc)
 
 def main(args):
   save_dir = os.path.join(args.save_dir)
@@ -32,19 +32,19 @@ def main(args):
   config_proto = utils.get_config_proto()
 
   sess = tf.Session(config=config_proto)
-  models = get_multi_gpu_models(args, sess)
+  models = get_multi_gpu_models(args, sess, restore=True)
   trainer = MultiGPU(args, models)
-
+  sess.run(tf.global_variables_initializer())
   for step in range(1, args.nb_steps+1):
     step_start_time = time.time()
-    train_images, train_labels, _, _, _ = utils.read_clip_and_label(filename='list/train.list',
+    train_images, train_labels, _, _, _ = utils.read_clip_and_label(filename='list/trainlist.txt',
           batch_size=args.batch_size * args.num_gpu, num_frames_per_clip=args.frame_size,
           crop_size=args.img_h, shuffle=True)
     _, loss, summaries = trainer.train(sess, train_images, train_labels)
-    writer.add_summary(summary, step)
+    summary_writer.add_summary(summaries, step)
 
-  if step % args.log_step == 0:
-    print "step %d, loss %.f, time %.2fs" % (step, loss, time.time() - step_start_time)
+    if step % args.log_step == 0:
+      print ("step %d, loss %.f, time %.2fs" % (step, loss, time.time() - step_start_time))
 
 
 if __name__ == '__main__':
