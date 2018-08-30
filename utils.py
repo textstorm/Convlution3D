@@ -83,6 +83,33 @@ def read_clip_and_label(filename, batch_size, start_pos=-1, num_frames_per_clip=
 
   return np_arr_data, np_arr_label, next_batch_start, read_dirnames, valid_len
 
+def calculate_ucf_101_mean(ucf_train_lst, num_frames=16, new_w_h_size=112):
+  mean = np.zeros((num_frames, new_w_h_size, new_w_h_size, 3))
+  count = 0
+
+  with open(ucf_train_lst) as f:
+    for line in f:
+      vid_path = line.split()[0]
+      start_pos = int(line.split()[1])
+      lbl = int(line.split()[2])
+
+      stack_frames = []
+
+      for i in range(start_pos, start_pos+num_frames):
+        img = cv2.imread(os.path.join(vid_path, "{:06}.jpg".format(i)))
+        img = cv2.resize(img, (new_w_h_size, new_w_h_size))
+        stack_frames.append(img)
+
+      stack_frames = np.array(stack_frames)
+      mean += stack_frames
+      count += 1
+  mean/=float(count)
+  print (mean)
+  return mean
+
+# mean_ucf101_16 = calculate_ucf_101_mean("trainlist01.txt")
+# np.save("crop_mean_16.npy", mean_ucf101_16)
+
 def get_config_proto(log_device_placement=False, allow_soft_placement=True):
   config_proto = tf.ConfigProto(
       log_device_placement=log_device_placement,
