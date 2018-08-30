@@ -8,10 +8,10 @@ import os
 from model import *
 import tensorflow as tf
 
-def valid(valid_data, model, sess):
+def valid(valid_data, valid_label, trainer, sess):
   total_logits = []
   total_labels = []
-  for batch in test_data:
+  for batch in valid_data:
     comments, comments_length, labels = batch
     loss_t, logits_t, batch_size = model.test(sess, comments, comments_length, labels, 1.0)
     total_logits += logits_t.tolist()
@@ -50,6 +50,11 @@ def main(args):
     if step % args.log_step == 0:
       print ("step %d, loss %.5f, accuracy %.5f, time %.2fs" % (step, loss, accuracy, time.time() - step_start_time))
 
+    if step & args.eval_step == 0:
+      val_images, val_labels, _, _, _ = utils.read_clip_and_label(filename='list/testlist.txt',
+            batch_size=args.batch_size * args.num_gpu, num_frames_per_clip=args.frame_size,
+            crop_size=args.img_h, shuffle=False)
+      val_accuracy = valid(val_images, val_labels, trainer, sess)
 
 if __name__ == '__main__':
   args = config.get_args()
