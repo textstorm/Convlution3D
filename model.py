@@ -21,10 +21,9 @@ class C3D(object):
     self.global_step = tf.get_variable(shape=[], initializer=tf.constant_initializer(0), 
                                        trainable=False, name='global_step')
 
-    self.tvars = tf.trainable_variables()
-
     with tf.variable_scope(name):
       x = tf.nn.relu(self.conv3d(self.images, 3, 3, 3, 3, 64, "conv1"))
+      # x = tf.nn.relu(tf.layers.conv3d(inputs=self.images, filters=64, kernel_size=3, padding='SAME'))
       x = self.max_pool3d(x, 1, "pool1")
       x = tf.nn.relu(self.conv3d(x, 3, 3, 3, 64, 128, "conv2"))
       x = self.max_pool3d(x, 2, "pool2")
@@ -39,17 +38,17 @@ class C3D(object):
       x = self.max_pool3d(x, 2, "pool5")
       # x = tf.transpose(x, perm=[0,1,4,2,3])
       x = tf.reshape(x, [self.batch_size, -1])
-      x = tf.nn.relu(tf.layers.dense(x, 4096, name="fc1"))
+      x = tf.nn.relu(self.linear(x, 4096, name="fc1"))
       x = tf.nn.dropout(x, 1.0-self.dropout)
-      x = tf.nn.relu(tf.layers.dense(x, 4096, name="fc2"))
+      x = tf.nn.relu(self.linear(x, 4096, name="fc2"))
       x = tf.nn.dropout(x, 1.0-self.dropout)
-      logits = tf.layers.dense(x, self.nb_classes, name="logits")
+      logits = self.linear(x, self.nb_classes, name="logits")
 
     with tf.name_scope("loss"):
       cross_entropy = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
                                     labels=self.labels, logits=logits))
       tf.summary.scalar("loss" + '_cross_entropy', cross_entropy)
-      weight_decay_loss = tf.get_collection('weightdecay_losses', scope="model_%d"%idx)
+      weight_decay_loss = tf.reduce_mean(tf.get_collection('weightdecay_losses', scope="model_%d"%idx))
       tf.summary.scalar("loss" + '_weight_decay_loss', tf.reduce_mean(weight_decay_loss))
       self.total_loss = cross_entropy + weight_decay_loss
       tf.summary.scalar("loss" + '_total_loss', tf.reduce_mean(self.total_loss))
@@ -61,17 +60,22 @@ class C3D(object):
       correct_pred = tf.equal(tf.argmax(logits, 1), self.labels)
       accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
 
+    self.tvars = tf.trainable_variables()
     init_op = tf.global_variables_initializer()
     self.sess.run(init_op)
     self.summary = tf.summary.merge_all()
     self.saver = tf.train.Saver(tf.global_variables())
 
   def conv3d(self, x, fs, hs, ws, n_in, n_out, name=None):
-    # w = self.variable_with_weight_decay(shape=[fs, hs, ws, n_in, n_out], name=name+"_w", wd=0.0005)
-    w = self.variable_with_weight_decay(shape=[fs, hs, ws, n_in, n_out], name=name+"_w")
+    w = self.variable_with_weight_decay(shape=[fs, hs, ws, n_in, n_out], name=name+"_w", wd=0.0005)
     b = self.variable_with_weight_decay(shape=[n_out], name=name+"_bias")
     x = tf.nn.conv3d(x, w, strides=[1, 1, 1, 1, 1], padding='SAME', name=name)
     return tf.nn.bias_add(x, b)
+
+  def linear(self, x, units, name=None):
+    w = self.variable_with_weight_decay(shape=[x.get_shape().as_list()[-1], units], name=name+"_w", wd=0.0005)
+    b = self.variable_with_weight_decay(shape=[units], name=name+"_bias")
+    return tf.nn.bias_add(tf.matmul(x, w), b)
 
   def max_pool3d(self, x, k, name):
     return tf.nn.max_pool3d(x, [1, k, 2, 2, 1], [1, k, 2, 2, 1], padding="SAME", name=name)
@@ -91,15 +95,61 @@ class C3D(object):
       tf.add_to_collection('weightdecay_losses', weight_decay)
     return var
 
-def get_multi_gpu_models(args, sess):
+def get_multi_gpu_models(args, sess, restore=False):
   models = []
   with tf.variable_scope(tf.get_variable_scope()):
     for gpu_idx in range(args.num_gpu):
       with tf.name_scope("model_%d"%gpu_idx), tf.device("/gpu:%d"%gpu_idx):
         c3d = C3D(args, sess, gpu_idx, name="C3D")
+        if restore:
+          restore_dict = restore_func(args.load_path, c3d.tvars)
+          c3d.saver = tf.train.Saver(restore_dict)
+          sess.run(tf.global_variables_initializer())
+          saver.restore(sess, args.load_path)
         tf.get_variable_scope().reuse_variables()
         models.append(c3d)
   return models
+
+def restore_func(load_path, tvars)
+  reader = tf.train.NewCheckpointReader(load_path)
+  var_to_shape_map = reader.get_variable_to_shape_map()
+  var_name = []
+  for key in var_to_shape_map:
+    var_name.append(key)
+  var_name_sorted = sorted(var_name)
+
+  convert_name = []
+  for name in var_name_sorted:
+    if "var_name" in name:
+      name = name.replace("var_name", "C3D")
+    if "bc" in name:
+      name = name.replace("bc", "conv")
+      name += "_bias"
+    elif "bd" in name:
+      name = name.replace("bd", "fc")
+      name += "_bias"
+    elif "bout" in name:
+      name = name.replace("bout", "logits_bias")
+    elif "wc" in name:
+      name = name.replace("wc", "conv")
+      name += "_w"
+    elif "wd" in name:
+      name = name.replace("wd", "fc")
+      name += "_w"
+    elif "wout" in name:
+      name = name.replace("wout", "logits_w")
+    else:
+      pass
+    convert_name.append(name)
+
+  convert_dict = dict(zip(convert_name, var_name_sorted))
+  restore_dict = dict()
+  for v in tvars():
+    tensor_name = v.name.split(':')[0]
+    if reader.has_tensor(convert_dict[tensor_name]):
+      print('has tensor ', tensor_name)
+      restore_dict[tensor_name] = v
+  return restore_dict
 
 class MultiGPU(object):
   def __init__(self, args, models):
@@ -130,11 +180,12 @@ class MultiGPU(object):
 
   def train(self, sess, images, labels):
     half_idx = len(images) // 2
+    feed_dict = {}
     for idx, model in enumerate(self.models):
       images_feed = images[idx* half_idx: (idx+1)*half_idx]
       labels_feed = labels[idx* half_idx: (idx+1)*half_idx]
-      model.feed_dict = model.build_feed_dict(images_feed, labels_feed, True)
-    return sess.run([self.train_op, self.loss, self.summary])
+      feed_dict.update(model.build_feed_dict(images_feed, labels_feed, True))
+    return sess.run([self.train_op, self.loss, self.summary], feed_dict=feed_dict)
 
   def test(self, sess, input_x, sequence_length, input_y, keep_prob):
     return sess.run([self.loss, 
