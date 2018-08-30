@@ -105,12 +105,12 @@ def get_multi_gpu_models(args, sess, restore=False):
           restore_dict = restore_func(args.load_path, c3d.tvars)
           c3d.saver = tf.train.Saver(restore_dict)
           sess.run(tf.global_variables_initializer())
-          saver.restore(sess, args.load_path)
+          c3d.saver.restore(sess, args.load_path)
         tf.get_variable_scope().reuse_variables()
         models.append(c3d)
   return models
 
-def restore_func(load_path, tvars)
+def restore_func(load_path, tvars):
   reader = tf.train.NewCheckpointReader(load_path)
   var_to_shape_map = reader.get_variable_to_shape_map()
   var_name = []
@@ -130,6 +130,7 @@ def restore_func(load_path, tvars)
       name += "_bias"
     elif "bout" in name:
       name = name.replace("bout", "logits_bias")
+      pass
     elif "wc" in name:
       name = name.replace("wc", "conv")
       name += "_w"
@@ -138,17 +139,20 @@ def restore_func(load_path, tvars)
       name += "_w"
     elif "wout" in name:
       name = name.replace("wout", "logits_w")
+
     else:
       pass
     convert_name.append(name)
 
   convert_dict = dict(zip(convert_name, var_name_sorted))
   restore_dict = dict()
-  for v in tvars():
+  for v in tvars:
     tensor_name = v.name.split(':')[0]
     if reader.has_tensor(convert_dict[tensor_name]):
       print('has tensor ', tensor_name)
-      restore_dict[tensor_name] = v
+      restore_dict[convert_dict[tensor_name]] = v
+  restore_dict.pop("var_name/wout")
+  restore_dict.pop("var_name/bout")
   return restore_dict
 
 class MultiGPU(object):
