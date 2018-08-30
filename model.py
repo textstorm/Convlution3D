@@ -23,7 +23,6 @@ class C3D(object):
 
     with tf.variable_scope(name):
       x = tf.nn.relu(self.conv3d(self.images, 3, 3, 3, 3, 64, "conv1"))
-      # x = tf.nn.relu(tf.layers.conv3d(inputs=self.images, filters=64, kernel_size=3, padding='SAME'))
       x = self.max_pool3d(x, 1, "pool1")
       x = tf.nn.relu(self.conv3d(x, 3, 3, 3, 64, 128, "conv2"))
       x = self.max_pool3d(x, 2, "pool2")
@@ -48,11 +47,10 @@ class C3D(object):
       cross_entropy = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
                                     labels=self.labels, logits=logits))
       tf.summary.scalar("loss" + '_cross_entropy', cross_entropy)
-      self.total_loss = cross_entropy
-      # weight_decay_loss = tf.reduce_mean(tf.get_collection('weightdecay_losses', scope="model_%d"%idx))
-      # tf.summary.scalar("loss" + '_weight_decay_loss', tf.reduce_mean(weight_decay_loss))
-      # self.total_loss = cross_entropy + weight_decay_loss
-      # tf.summary.scalar("loss" + '_total_loss', tf.reduce_mean(self.total_loss))
+      weight_decay_loss = tf.reduce_mean(tf.get_collection('weightdecay_losses', scope="model_%d"%idx))
+      tf.summary.scalar("loss" + '_weight_decay_loss', weight_decay_loss)
+      self.total_loss = cross_entropy + weight_decay_loss
+      tf.summary.scalar("loss" + '_total_loss', self.total_loss)
 
     with tf.name_scope("inference"):
       self.infer_op = tf.argmax(logits, 1)
@@ -66,15 +64,13 @@ class C3D(object):
     self.saver = tf.train.Saver(tf.global_variables())
 
   def conv3d(self, x, fs, hs, ws, n_in, n_out, name=None):
-    # w = self.variable_with_weight_decay(shape=[fs, hs, ws, n_in, n_out], name=name+"_w", wd=0.0005)
-    w = self.variable_with_weight_decay(shape=[fs, hs, ws, n_in, n_out], name=name+"_w")
+    w = self.variable_with_weight_decay(shape=[fs, hs, ws, n_in, n_out], name=name+"_w", wd=0.0005)
     b = self.variable_with_weight_decay(shape=[n_out], name=name+"_bias")
     x = tf.nn.conv3d(x, w, strides=[1, 1, 1, 1, 1], padding='SAME', name=name)
     return tf.nn.bias_add(x, b)
 
   def linear(self, x, units, name=None):
-    # w = self.variable_with_weight_decay(shape=[x.get_shape().as_list()[-1], units], name=name+"_w", wd=0.0005)
-    w = self.variable_with_weight_decay(shape=[x.get_shape().as_list()[-1], units], name=name+"_w")
+    w = self.variable_with_weight_decay(shape=[x.get_shape().as_list()[-1], units], name=name+"_w", wd=0.0005)
     b = self.variable_with_weight_decay(shape=[units], name=name+"_bias")
     return tf.nn.bias_add(tf.matmul(x, w), b)
 
@@ -157,10 +153,6 @@ def restore_func(load_path, tvars):
       restore_dict[convert_dict[tensor_name]] = v
   restore_dict.pop("var_name/wout")
   restore_dict.pop("var_name/bout")
-  # restore_dict.pop('var_name/bd1')
-  # restore_dict.pop('var_name/bd2')
-  # restore_dict.pop('var_name/wd1')
-  # restore_dict.pop('var_name/wd2')
   return restore_dict
 
 class MultiGPU(object):
@@ -202,12 +194,14 @@ class MultiGPU(object):
       feed_dict.update(model.build_feed_dict(images_feed, labels_feed, True))
     return sess.run([self.train_op, self.loss, self.accuracy, self.summary], feed_dict=feed_dict)
 
-  def test(self, sess, input_x, sequence_length, input_y, keep_prob):
-    return sess.run([self.loss, 
-                     self.logits, 
-                     self.batch_size], 
-                     feed_dict={self.input_x: input_x, self.input_y: input_y, 
-                               self.keep_prob: keep_prob, self.sequence_length: sequence_length})
+  def test(self, sess, images, labels):
+    half_idx = len(images) // 2
+    feed_dict = {}
+    for idx, model in enumerate(self.models):
+      images_feed = images[idx* half_idx: (idx+1)*half_idx]
+      labels_feed = labels[idx* half_idx: (idx+1)*half_idx]
+      feed_dict.update(model.build_feed_dict(images_feed, labels_feed, True))
+    return sess.run(self.accuracy, feed_dict=feed_dict)
 
   def average_gradients(self, grads_list):
     average_grads = []
@@ -222,4 +216,3 @@ class MultiGPU(object):
       grad_and_var = (grad, v)
       average_grads.append(grad_and_var)
     return average_grads
-
