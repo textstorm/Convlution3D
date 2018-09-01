@@ -8,17 +8,20 @@ import os
 from model import *
 import tensorflow as tf
 
-def valid(valid_data, valid_label, trainer, sess):
-  total_logits = []
-  total_labels = []
-  for batch in valid_data:
-    comments, comments_length, labels = batch
-    loss_t, logits_t, batch_size = model.test(sess, comments, comments_length, labels, 1.0)
-    total_logits += logits_t.tolist()
-    total_labels += labels
-  auc = metrics.roc_auc_score(np.array(total_labels), np.array(total_logits))
-  print ("auc %f in valid comments" % auc)
+def valid(args, test_file, trainer, sess):
+  next_start_pos = 0
+  infer_list = []
+  labels = []
+  num_test_videos =  len(list(open(test_file)))
+  all_steps = int((num_test_videos - 1) / (args.batch_size * args.num_gpu) + 1)
+  for step in range(all_steps):
+    start_time = time.time()
+    test_images, test_labels, next_start_pos, _, valid_len = utils.read_clip_and_label(
+                    test_file, args.batch_size * args.num_gpu, start_pos=next_start_pos)
+    infer_list.extend(trainer.test(sess, test_images, test_labels))
+    labels.extend(test_labels)
 
+  return np.mean(np.equal(infer_list[:num_test_videos], labels[:num_test_videos])), time.time()-start_time
 
 def main(args):
   save_dir = os.path.join(args.save_dir)
@@ -50,11 +53,9 @@ def main(args):
     if step % args.log_step == 0:
       print ("step %d, loss %.5f, accuracy %.5f, time %.2fs" % (step, loss, accuracy, time.time() - step_start_time))
 
-    if step & args.eval_step == 0:
-      val_images, val_labels, _, _, _ = utils.read_clip_and_label(filename='list/testlist.txt',
-            batch_size=args.batch_size * args.num_gpu, num_frames_per_clip=args.frame_size,
-            crop_size=args.img_h, shuffle=False)
-      val_accuracy = valid(val_images, val_labels, trainer, sess)
+    if step % args.eval_step == 0:
+      val_accuracy, test_time = valid(args, 'list/testlist.txt', trainer, sess)
+      print ("test accuracy: %.5f, test time: %.5f" % (val_accuracy, test_time))
 
 if __name__ == '__main__':
   args = config.get_args()
