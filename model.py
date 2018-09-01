@@ -167,6 +167,7 @@ class MultiGPU(object):
 
     loss_list = []
     grads_list = []
+    infer_list = []
     accuracy = 0.0
 
     with tf.variable_scope(tf.get_variable_scope()):
@@ -177,13 +178,15 @@ class MultiGPU(object):
           grads_and_vars = [(tf.clip_by_norm(g, self.max_grad_norm), v) for g, v in grads_and_vars]
           loss_list.append(loss)
           grads_list.append(grads_and_vars)
+          infer_list.append(model.infer_op)
           accuracy += model.accuracy
           tf.get_variable_scope().reuse_variables()
 
-    self.loss = tf.add_n(loss_list) / float(len(loss_list))
+    self.loss = tf.add_n(loss_list) / len(loss_list)
     self.grads_and_vars = self.average_gradients(grads_list)
     self.train_op = self.optimizer.apply_gradients(self.grads_and_vars, global_step=self.global_step)
     self.accuracy = accuracy / len(self.models)
+    self.infer_list = tf.concat(infer_list, axis=0)
 
   def train(self, sess, images, labels):
     half_idx = len(images) // 2
@@ -200,8 +203,8 @@ class MultiGPU(object):
     for idx, model in enumerate(self.models):
       images_feed = images[idx* half_idx: (idx+1)*half_idx]
       labels_feed = labels[idx* half_idx: (idx+1)*half_idx]
-      feed_dict.update(model.build_feed_dict(images_feed, labels_feed, True))
-    return sess.run(self.accuracy, feed_dict=feed_dict)
+      feed_dict.update(model.build_feed_dict(images_feed, labels_feed, False))
+    return sess.run(self.infer_list, feed_dict=feed_dict)
 
   def average_gradients(self, grads_list):
     average_grads = []
