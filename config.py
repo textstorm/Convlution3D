@@ -28,5 +28,6 @@ def get_args():
   parser.add_argument('--learning_rate', type=float, default=0.0001, help='Initial learning rate')
   parser.add_argument('--max_grad_norm', type=float, default=10.0, help='Max norm of gradient')
   parser.add_argument('--log_step', type=int, default=1, help='log steps')
+  parser.add_argument('--eval_step', type=int, default=500, help='eval steps')
 
   return parser.parse_args()
